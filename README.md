@@ -59,7 +59,7 @@ automatique toutes les 10 secondes lorsque la page est ouverte.
    Render doit pouvoir lire le dépôt pour construire l'application.
 2. Dans Render, choisissez **New +** puis **Blueprint** et connectez le dépôt.
 3. Render détectera `render.yaml`, construira l'interface React et l'API, puis
-   fournira une URL HTTPS �� ouvrir sur le téléphone.
+   fournira une URL HTTPS à ouvrir sur le téléphone.
 
 Le plan gratuit peut mettre l'application en veille après une période sans visite ;
 le premier chargement qui suit peut prendre un peu plus de temps. Le PC personnel
