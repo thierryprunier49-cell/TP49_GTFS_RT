@@ -1,5 +1,5 @@
 
-# Étape 1 : construction du frontend
+# Étape 1 : construire le frontend React/Vite
 FROM node:22-alpine AS frontend-build
 
 WORKDIR /app
@@ -7,10 +7,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-COPY . .
+COPY App.jsx main.jsx index.html styles.css vite.config.js ./
 RUN npm run build
 
-# Étape 2 : backend Python
+# Étape 2 : lancer le backend Flask
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -25,4 +25,5 @@ ENV PORT=10000
 EXPOSE 10000
 
 CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 8 web_app:app"]
+
 
