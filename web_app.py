@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from threading import Lock
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 import requests
 
 import gtfs_rt_prouhon as transit
@@ -67,7 +67,44 @@ def health():
 @app.get("/carte")
 def map_page():
     if not MAP_FILE.is_file():
-        return jsonify({"error": "La carte est en cours de génération."}), 503
+        response = Response(
+            """<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-store">
+    <title>Chargement de la cartographie</title>
+  </head>
+  <body>
+    <p id="status">La carte se prépare. Cette page va se mettre à jour automatiquement.</p>
+    <script>
+      async function checkMap() {
+        try {
+          const response = await fetch("/carte", {
+            method: "HEAD",
+            cache: "no-store"
+          });
+          if (response.ok) {
+            window.location.reload();
+            return;
+          }
+        } catch (error) {
+          document.getElementById("status").textContent =
+            "La carte est toujours en préparation. Nouvelle vérification en cours…";
+        }
+        window.setTimeout(checkMap, 5000);
+      }
+      window.setTimeout(checkMap, 5000);
+    </script>
+  </body>
+</html>""",
+            status=503,
+            mimetype="text/html",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Retry-After"] = "5"
+        return response
     response = send_from_directory(MAP_FILE.parent, MAP_FILE.name)
     response.headers["Cache-Control"] = "no-store"
     return response

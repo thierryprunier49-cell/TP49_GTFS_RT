@@ -1064,16 +1064,30 @@ def save_map(map_object, output_file):
 
 def load_data():
     session = requests.Session()
-    load_gtfs_static_data(session)
-    return session
+    while True:
+        routes_data.clear()
+        shapes_data.clear()
+        trips_data.clear()
+        stops_data.clear()
+        stops_coords.clear()
+        scheduled_departures.clear()
+        calendar_data.clear()
+        calendar_dates_data.clear()
+        try:
+            load_gtfs_static_data(session)
+        except Exception as error:
+            print(f"❌ Erreur au chargement du GTFS statique : {error}")
+        if routes_data and stops_coords:
+            return session
+        print(
+            "❌ Impossible de charger les données GTFS statiques. "
+            "Nouvel essai dans 30 secondes."
+        )
+        time.sleep(30)
 
 
 def main():
-    print("📥 Chargement initial des données GTFS statiques...")
     session = load_data()
-    if not routes_data or not stops_coords:
-        print("❌ Impossible de charger les données GTFS statiques. Vérifiez la connexion et réessayez.")
-        return
     if not SIRI_USE:
         print("ℹ️  SIRI désactivé")
 

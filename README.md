@@ -86,7 +86,8 @@ fichiers du projet, y compris `render.yaml`, puis choisissez **New +** →
    fichier `index.html` généré contient déjà l'interface complète. Une fois
    le service lancé, utilisez le lien **Cartographie** ou ouvrez directement
    `/carte`. La carte peut mettre quelques instants à apparaître lors du
-   premier chargement des données GTFS. Chaque nouvelle carte remplace la
+   premier chargement des données GTFS ; une page d'attente se vérifie toute seule
+   toutes les cinq secondes pendant la génération. Chaque nouvelle carte remplace la
    précédente de façon atomique pour éviter une page blanche pendant le
    rafraîchissement automatique.
 
