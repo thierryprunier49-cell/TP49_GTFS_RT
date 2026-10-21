@@ -35,6 +35,7 @@ SIRI_API_KEY_HEADER = os.environ.get("SIRI_API_KEY_HEADER", "X-API-Key")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 AUTO_REFRESH_SECONDS = 15
+MAX_VEHICLE_POSITION_AGE_SECONDS = 180
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(DATA_DIR, "irigo_map.html")
 CACHE_POSITIONS_FILE = os.path.join(DATA_DIR, "positions.pb")
@@ -470,6 +471,14 @@ def create_custom_icon(route_name, vehicle_id, style, destination="", departure_
     return folium.DivIcon(html=html)
 
 
+def is_fresh_vehicle_position(vehicle, now=None):
+    if not vehicle.HasField('timestamp'):
+        return False
+    reference_time = time.time() if now is None else now
+    age_seconds = reference_time - vehicle.timestamp
+    return -30 <= age_seconds <= MAX_VEHICLE_POSITION_AGE_SECONDS
+
+
 def fetch_gtfs_realtime_feed(session, url, label, cache_file=None):
     feed = gtfs_realtime_pb2.FeedMessage()
     try:
@@ -724,6 +733,7 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
     displayed_vehicle_types = []
     realtime_count = 0
     static_count = 0
+    stale_position_count = 0
     displayed_trip_ids = set()
 
     def add_marker(lat, lon, route_id, route_name, trip_id, vehicle_id, dest, departure_time, departure_source, popup):
@@ -744,10 +754,14 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             static_count += 1
 
     if positions_feed:
+        positions_checked_at = time.time()
         for entity in positions_feed.entity:
             if not entity.HasField('vehicle'):
                 continue
             vehicle = entity.vehicle
+            if not is_fresh_vehicle_position(vehicle, positions_checked_at):
+                stale_position_count += 1
+                continue
             lat = vehicle.position.latitude
             lon = vehicle.position.longitude
             vehicle_id = vehicle.vehicle.id if vehicle.vehicle.id else 'N/A'
@@ -805,6 +819,13 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             """
             add_marker(lat, lon, route_id, route_name, trip_id, vehicle_id, dest, departure_time, departure_source, popup)
             displayed_trip_ids.add(trip_id)
+
+    if stale_position_count:
+        print(
+            f"⚠️ {stale_position_count} positions GTFS-RT ignorées "
+            f"(sans horodatage ou âgées de plus de "
+            f"{MAX_VEHICLE_POSITION_AGE_SECONDS} secondes)"
+        )
 
     if siri_positions:
         for vehicle in siri_positions:

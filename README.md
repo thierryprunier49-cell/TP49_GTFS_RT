@@ -55,6 +55,8 @@ automatique toutes les 10 secondes lorsque la page est ouverte. La compilation
 génère un `index.html` autonome à la racine, pour que le déploiement n'ait pas
 besoin du dossier `frontend`. En production, le générateur de cartographie
 actualise aussi la carte toutes les 15 secondes ; elle est accessible à `/carte`.
+Les positions GTFS-RT sans horodatage ou âgées de plus de trois minutes sont
+ignorées pour éviter d'afficher des véhicules arrêtés comme s'ils étaient en direct.
 
 ### Déploiement sur Render
 
