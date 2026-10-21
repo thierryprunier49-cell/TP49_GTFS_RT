@@ -35,7 +35,7 @@ SIRI_API_KEY_HEADER = os.environ.get("SIRI_API_KEY_HEADER", "X-API-Key")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 AUTO_REFRESH_SECONDS = 15
-MAX_VEHICLE_POSITION_AGE_SECONDS = 180
+MAX_VEHICLE_POSITION_AGE_SECONDS = 60
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(DATA_DIR, "irigo_map.html")
 CACHE_POSITIONS_FILE = os.path.join(DATA_DIR, "positions.pb")
@@ -802,17 +802,22 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             if departure_time is None and scheduled is not None:
                 departure_time = format_seconds_as_time(scheduled['departure_seconds'])
             departure_source = departure_sources.get(trip_id) or ('static' if scheduled else 'N/A')
+            position_age_seconds = max(
+                0,
+                int(positions_checked_at - vehicle.timestamp),
+            )
             style = get_route_style(route_info, route_id=route_id)
             popup = f"""
             <b>Ligne :</b> {route_name}<br>
             <b>Type :</b> {style['route_emoji']} {style['route_type_name']}<br>
             <b>Véhicule :</b> {vehicle_id}<br>
             <b>Trip :</b> {trip_id}<br>
+            <b>Dernière position GPS :</b> il y a {position_age_seconds} s<br>
             <b>Destination :</b> {dest or 'N/A'}<br>
             <b>Source horaire :</b> {departure_source}<br>
             <b>Arrêt suivant :</b> {next_stop_name or 'N/A'}<br>
-            <b>Heure prévue :</b> {scheduled_time or 'N/A'}<br>
-            <b>Heure estimée :</b> {departure_time or 'N/A'}<br>
+            <b>Départ prévu :</b> {scheduled_time or 'N/A'}<br>
+            <b>Départ estimé :</b> {departure_time or 'N/A'}<br>
             <b>Termin. :</b> {terminus_stop_name or 'N/A'}<br>
             <b>Arrivée terminus :</b> {terminus_arrival_time or 'N/A'}<br>
             <b>Écart :</b> {delay_text or 'N/A'}<br>
