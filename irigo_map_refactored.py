@@ -642,7 +642,11 @@ def build_arrivals(trip_updates_feed):
 
 
 def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times, departure_delays, departure_schedules, departure_sources, static_arrivals, realtime_arrivals):
-    m = folium.Map(location=[47.4784, -0.5632], zoom_start=12, tiles="CartoDB positron")
+    m = folium.Map(
+        location=[47.4784, -0.5632],
+        zoom_start=12,
+        tiles="OpenStreetMap",
+    )
     print("📍 Affichage des trajets des lignes...")
     displayed_shapes = set()
     for trip_id, trip_info in trips_data.items():

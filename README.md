@@ -24,7 +24,7 @@ http://127.0.0.1:8000/irigo_map.html
 
 > Ouvrir `irigo_map.html` directement avec `file://` peut parfois provoquer un rendu blanc si les ressources externes ne sont pas chargées correctement.
 
-Le fond de carte utilise CARTO Positron, avec l’attribution OpenStreetMap et CARTO intégrée.
+Le fond de la carte interactive utilise les tuiles OpenStreetMap, sans clé d'API.
 
 ## Remarque
 
