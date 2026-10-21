@@ -58,6 +58,8 @@ automatique toutes les 10 secondes lorsque la page est ouverte. La compilation
 génère un `index.html` autonome à la racine, pour que le déploiement n'ait pas
 besoin du dossier `frontend`. En production, le générateur de cartographie
 actualise aussi la carte toutes les 15 secondes ; elle est accessible à `/carte`.
+La page conserve la carte actuelle visible pendant le chargement de la suivante,
+puis bascule automatiquement une fois la nouvelle carte chargée.
 Les positions GTFS-RT sans horodatage ou âgées de plus d'une minute sont
 ignorées ; les véhicules sans numéro sont masqués et l'âge de la dernière
 position GPS est affiché dans leur fiche. Les marqueurs représentent uniquement

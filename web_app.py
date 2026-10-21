@@ -105,6 +105,68 @@ def map_page():
         response.headers["Cache-Control"] = "no-store"
         response.headers["Retry-After"] = "5"
         return response
+    response = Response(
+        """<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-store">
+    <title>Cartographie Irigo</title>
+    <style>
+      html, body, iframe {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        border: 0;
+        overflow: hidden;
+      }
+      iframe {
+        position: fixed;
+        inset: 0;
+      }
+      .map-hidden {
+        visibility: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe id="map-a" title="Cartographie Irigo" src="/carte/map"></iframe>
+    <iframe id="map-b" title="Actualisation de la cartographie" class="map-hidden"></iframe>
+    <script>
+      (function() {
+        const refreshInterval = 15000;
+        let activeMap = document.getElementById("map-a");
+        let loadingMap = document.getElementById("map-b");
+        let refreshPending = false;
+
+        function refreshMap() {
+          if (refreshPending) return;
+          refreshPending = true;
+          loadingMap.onload = function() {
+            loadingMap.classList.remove("map-hidden");
+            activeMap.classList.add("map-hidden");
+            const previousMap = activeMap;
+            activeMap = loadingMap;
+            loadingMap = previousMap;
+            refreshPending = false;
+          };
+          loadingMap.src = "/carte/map?refresh=" + Date.now();
+        }
+
+        window.setInterval(refreshMap, refreshInterval);
+      })();
+    </script>
+  </body>
+</html>""",
+        mimetype="text/html",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/carte/map")
+def map_document():
     response = send_from_directory(MAP_FILE.parent, MAP_FILE.name)
     response.headers["Cache-Control"] = "no-store"
     return response

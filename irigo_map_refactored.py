@@ -623,7 +623,7 @@ def build_map(
         tiles="OpenStreetMap",
     )
     back_button_html = """
-    <a href="/" aria-label="Retour aux prochains passages"
+    <a href="/" target="_top" aria-label="Retour aux prochains passages"
        style="position: fixed; top: 12px; left: 55px; z-index: 10000;
               padding: 9px 14px; border: 1px solid #b8c2cc; border-radius: 8px;
               background: white; color: #245a91; font: 600 14px sans-serif;
@@ -917,9 +917,6 @@ def build_map(
           window.addEventListener('pagehide', function() {{
             saveState(map);
           }});
-          setTimeout(function() {{
-            window.location.reload(true);
-          }}, {AUTO_REFRESH_SECONDS * 1000});
         }}
 
         if (document.readyState === 'loading') {{
