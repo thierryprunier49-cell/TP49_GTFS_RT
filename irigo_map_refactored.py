@@ -5,6 +5,7 @@ import csv
 import io
 import os
 import sys
+import tempfile
 import time
 import zipfile
 from collections import defaultdict
@@ -1024,7 +1025,19 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
 
 
 def save_map(map_object, output_file):
-    map_object.save(output_file)
+    output_directory = os.path.dirname(os.path.abspath(output_file))
+    file_descriptor, temporary_file = tempfile.mkstemp(
+        prefix=f".{os.path.basename(output_file)}.",
+        suffix=".tmp",
+        dir=output_directory,
+    )
+    os.close(file_descriptor)
+    try:
+        map_object.save(temporary_file)
+        os.replace(temporary_file, output_file)
+    finally:
+        if os.path.exists(temporary_file):
+            os.unlink(temporary_file)
     print(f"📍 Carte générée : {output_file}")
 
 
