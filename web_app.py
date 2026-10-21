@@ -12,6 +12,7 @@ import gtfs_rt_prouhon as transit
 
 app = Flask(__name__)
 FRONTEND_DIST = Path(__file__).resolve().parent
+MAP_FILE = FRONTEND_DIST / "irigo_map.html"
 REFRESH_INTERVAL_SECONDS = 10
 PARIS_TIMEZONE = transit.LOCAL_TIMEZONE
 
@@ -61,6 +62,15 @@ def get_realtime_index():
 @app.get("/api/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.get("/carte")
+def map_page():
+    if not MAP_FILE.is_file():
+        return jsonify({"error": "La carte est en cours de génération."}), 503
+    response = send_from_directory(MAP_FILE.parent, MAP_FILE.name)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/stops")

@@ -53,7 +53,8 @@ un téléphone, y compris hors du réseau Wi-Fi local. Le serveur Python sert
 l'interface et fournit les données GTFS par une API, avec une actualisation
 automatique toutes les 10 secondes lorsque la page est ouverte. La compilation
 génère un `index.html` autonome à la racine, pour que le déploiement n'ait pas
-besoin du dossier `frontend`.
+besoin du dossier `frontend`. En production, le générateur de cartographie
+actualise aussi la carte toutes les 15 secondes ; elle est accessible à `/carte`.
 
 ### Déploiement sur Render
 
@@ -75,11 +76,15 @@ fichiers du projet, y compris `render.yaml`, puis choisissez **New +** →
 #### Depuis un téléversement de fichiers sur Render
 
 1. Effectuez la compilation ci-dessus sur le PC.
-2. Dans le service Render, remplacez les fichiers téléversés par ces cinq
-   fichiers, tous à la racine : `Dockerfile`, `requirements.txt`,
-   `gtfs_rt_prouhon.py`, `web_app.py` et `index.html`.
+2. Dans le service Render, téléversez ces six fichiers à la racine, en
+   remplaçant le Dockerfile et les fichiers déjà présents : `Dockerfile`,
+   `requirements.txt`, `gtfs_rt_prouhon.py`, `irigo_map_refactored.py`,
+   `web_app.py` et `index.html`.
 3. Relancez le déploiement. Aucun dossier `frontend` n'est nécessaire : le
-   fichier `index.html` généré contient déjà l'interface complète.
+   fichier `index.html` généré contient déjà l'interface complète. Une fois
+   le service lancé, utilisez le lien **Cartographie** ou ouvrez directement
+   `/carte`. La carte peut mettre quelques instants à apparaître lors du
+   premier chargement des données GTFS.
 
 Le plan gratuit peut mettre l'application en veille après une période sans visite ;
 le premier chargement qui suit peut prendre un peu plus de temps. Le PC personnel
@@ -98,6 +103,8 @@ python -m pip install -r requirements.txt
 python -m flask --app web_app run --host 0.0.0.0 --port 8000
 ```
 
-Ouvrez `http://127.0.0.1:8000` sur le PC. Pour tester depuis le téléphone sur
-le même Wi-Fi, ouvrez `http://ADRESSE-IP-DU-PC:8000` et autorisez le port dans
-le pare-feu Windows si nécessaire.
+Dans un second terminal, lancez `python irigo_map_refactored.py` pour générer
+et actualiser la carte. Ouvrez `http://127.0.0.1:8000` sur le PC ; utilisez le
+lien **Cartographie** pour accéder à `/carte`. Pour tester depuis le téléphone
+sur le même Wi-Fi, ouvrez `http://ADRESSE-IP-DU-PC:8000` et autorisez le port
+dans le pare-feu Windows si nécessaire.
