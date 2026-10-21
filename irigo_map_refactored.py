@@ -10,6 +10,7 @@ import time
 import zipfile
 from collections import defaultdict
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import folium
 import requests
@@ -36,7 +37,8 @@ SIRI_API_KEY_HEADER = os.environ.get("SIRI_API_KEY_HEADER", "X-API-Key")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 AUTO_REFRESH_SECONDS = 15
 MAX_VEHICLE_POSITION_AGE_SECONDS = 60
-MAX_TRIP_UPDATE_ESTIMATE_AHEAD_SECONDS = 15 * 60
+MAX_STOP_ARRIVAL_AHEAD_SECONDS = 3 * 60 * 60
+PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(DATA_DIR, "irigo_map.html")
 CACHE_POSITIONS_FILE = os.path.join(DATA_DIR, "positions.pb")
@@ -167,7 +169,7 @@ def is_service_active_today(service_id):
     if not service_id:
         return True  # Si pas de service_id, on suppose que c'est actif
     
-    today = datetime.now().date()
+    today = datetime.now(PARIS_TIMEZONE).date()
     today_str = today.strftime("%Y%m%d")
     day_name = today.strftime("%A").lower()
     day_mapping = {
@@ -222,7 +224,7 @@ def format_seconds_as_time(seconds):
 
 
 def get_current_seconds():
-    now = datetime.now()
+    now = datetime.now(PARIS_TIMEZONE)
     return now.hour * 3600 + now.minute * 60 + now.second
 
 
@@ -425,7 +427,13 @@ def get_route_style(route_info, route_id=None):
     }
 
 
-def create_custom_icon(route_name, vehicle_id, style, destination="", departure_time=None, departure_source='N/A'):
+def create_custom_icon(
+    route_name,
+    vehicle_id,
+    style,
+    destination="",
+    departure_source='N/A',
+):
     route_display = str(route_name)[:4]
     vehicle_display = str(vehicle_id)[-4:] if vehicle_id != 'N/A' else ''
     dest = str(destination) if destination is not None else ''
@@ -442,10 +450,6 @@ def create_custom_icon(route_name, vehicle_id, style, destination="", departure_
         'N/A': '#888888',
     }
     border_color = source_border_colors.get(departure_source, '#888888')
-
-    departure_html = ''
-    if departure_time:
-        departure_html = f'<div style="font-size: 8px; line-height: 1; opacity: 0.9;">Départ {departure_time}</div>'
 
     shape_styles = {
         'circle': 'border-radius: 50%;',
@@ -467,7 +471,6 @@ def create_custom_icon(route_name, vehicle_id, style, destination="", departure_
         <div style="{inner_transform} text-align: center; color: {text_color}; font-size: 12px; font-weight: bold;">
             <div style="line-height: 1;">{route_display}</div>
             <div style="font-size: 8px; line-height: 1;">{dest_display}</div>
-            {departure_html}
         </div>
     </div>
     """
@@ -480,68 +483,6 @@ def is_fresh_vehicle_position(vehicle, now=None):
     reference_time = time.time() if now is None else now
     age_seconds = reference_time - vehicle.timestamp
     return -30 <= age_seconds <= MAX_VEHICLE_POSITION_AGE_SECONDS
-
-
-def get_next_trip_update_stop(trip_update, trip_id, now=None):
-    now_timestamp = time.time() if now is None else now
-    today_midnight = datetime.fromtimestamp(now_timestamp).replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-    ).timestamp()
-    candidates = []
-
-    for stop_update in trip_update.stop_time_update:
-        stop_id = stop_update.stop_id or None
-        if not stop_id or stop_id not in stops_coords:
-            continue
-
-        estimated_timestamp = None
-        if stop_update.HasField('departure') and stop_update.departure.HasField('time'):
-            estimated_timestamp = stop_update.departure.time
-        elif stop_update.HasField('arrival') and stop_update.arrival.HasField('time'):
-            estimated_timestamp = stop_update.arrival.time
-        else:
-            delay = None
-            if stop_update.HasField('departure') and stop_update.departure.HasField('delay'):
-                delay = stop_update.departure.delay
-            elif stop_update.HasField('arrival') and stop_update.arrival.HasField('delay'):
-                delay = stop_update.arrival.delay
-            if delay is not None:
-                for scheduled_stop in scheduled_departures.get(trip_id, []):
-                    if (
-                        scheduled_stop.get('stop_id') == stop_id
-                        and scheduled_stop.get('departure_seconds') is not None
-                    ):
-                        estimated_timestamp = int(
-                            today_midnight
-                            + scheduled_stop['departure_seconds']
-                            + delay
-                        )
-                        break
-
-        if estimated_timestamp is None:
-            continue
-        seconds_ahead = estimated_timestamp - now_timestamp
-        if not 0 <= seconds_ahead <= MAX_TRIP_UPDATE_ESTIMATE_AHEAD_SECONDS:
-            continue
-        candidates.append(
-            (
-                estimated_timestamp,
-                stop_update.stop_sequence,
-                stop_id,
-            )
-        )
-
-    if not candidates:
-        return None
-
-    estimated_timestamp, _, stop_id = min(candidates)
-    return {
-        'stop_id': stop_id,
-        'time': datetime.fromtimestamp(estimated_timestamp).strftime('%H:%M'),
-    }
 
 
 def fetch_gtfs_realtime_feed(session, url, label, cache_file=None):
@@ -568,72 +509,13 @@ def fetch_gtfs_realtime_feed(session, url, label, cache_file=None):
         return None
 
 
-def parse_trip_updates(trip_updates_feed):
-    departure_times = {}
-    departure_delays = {}
-    departure_schedules = {}
-    departure_sources = {}
-
-    if not trip_updates_feed:
-        return departure_times, departure_delays, departure_schedules, departure_sources
-
-    for entity in trip_updates_feed.entity:
-        if not entity.HasField('trip_update'):
-            continue
-        trip_update = entity.trip_update
-        trip_id = trip_update.trip.trip_id if trip_update.trip.trip_id else None
-        if not trip_id:
-            continue
-        
-        # Vérifier si le service est actif aujourd'hui
-        trip_info = trips_data.get(trip_id, {})
-        service_id = trip_info.get('service_id', '')
-        if not is_service_active_today(service_id):
-            continue
-
-        scheduled = get_next_scheduled_departure(trip_id)
-        selected_delay = None
-        selected_timestamp = None
-        selected_sequence = None
-
-        for stu in trip_update.stop_time_update:
-            sequence = stu.stop_sequence if stu.HasField('stop_sequence') else 0
-            delay = None
-            if stu.HasField('departure') and stu.departure.HasField('delay'):
-                delay = stu.departure.delay
-            elif stu.HasField('arrival') and stu.arrival.HasField('delay'):
-                delay = stu.arrival.delay
-
-            if selected_sequence is None or sequence < selected_sequence:
-                selected_sequence = sequence
-                selected_delay = delay
-
-            if selected_timestamp is None:
-                if stu.HasField('departure') and stu.departure.HasField('time'):
-                    selected_timestamp = stu.departure.time
-                elif stu.HasField('arrival') and stu.arrival.HasField('time'):
-                    selected_timestamp = stu.arrival.time
-
-        if scheduled is not None:
-            departure_schedules[trip_id] = scheduled['departure_time']
-            departure_sources[trip_id] = 'realtime'
-            if selected_delay is not None:
-                actual_seconds = scheduled['departure_seconds'] + selected_delay
-                departure_times[trip_id] = format_seconds_as_time(actual_seconds)
-                departure_delays[trip_id] = selected_delay
-            else:
-                departure_times[trip_id] = format_seconds_as_time(scheduled['departure_seconds'])
-        elif selected_timestamp is not None:
-            departure_times[trip_id] = datetime.fromtimestamp(selected_timestamp).strftime("%H:%M")
-            departure_sources[trip_id] = 'realtime'
-
-    return departure_times, departure_delays, departure_schedules, departure_sources
-
-
 def build_arrivals(trip_updates_feed):
     static_arrivals = defaultdict(list)
     realtime_arrivals = defaultdict(list)
+    now = datetime.now(PARIS_TIMEZONE)
     now_seconds = get_current_seconds()
+    now_timestamp = now.timestamp()
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
     for trip_id, stops in scheduled_departures.items():
         trip_info = trips_data.get(trip_id, {})
@@ -653,6 +535,7 @@ def build_arrivals(trip_updates_feed):
                 continue
             static_arrivals[stop_id].append({
                 'seconds': dep_sec,
+                'timestamp': int(today_midnight + dep_sec),
                 'time': format_seconds_as_time(dep_sec),
                 'trip_id': trip_id,
                 'route_id': route_id,
@@ -661,15 +544,13 @@ def build_arrivals(trip_updates_feed):
     for arrivals in static_arrivals.values():
         arrivals.sort(key=lambda x: x['seconds'])
 
-    if not trip_updates_feed:
-        return static_arrivals, realtime_arrivals
-
-    today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    for entity in trip_updates_feed.entity:
+    for entity in trip_updates_feed.entity if trip_updates_feed else ():
         if not entity.HasField('trip_update'):
             continue
         trip_update = entity.trip_update
         trip_id = trip_update.trip.trip_id if trip_update.trip.trip_id else None
+        if not trip_id:
+            continue
         
         # Vérifier si le service est actif aujourd'hui
         trip_info = trips_data.get(trip_id, {})
@@ -679,7 +560,7 @@ def build_arrivals(trip_updates_feed):
         
         for stu in trip_update.stop_time_update:
             stop_id = stu.stop_id if stu.stop_id else None
-            if not stop_id:
+            if not stop_id or stop_id not in stops_coords:
                 continue
             est_ts = None
             if stu.HasField('departure') and stu.departure.HasField('time'):
@@ -699,8 +580,12 @@ def build_arrivals(trip_updates_feed):
                             break
             if est_ts is None:
                 continue
+            if not now_timestamp <= est_ts <= (
+                now_timestamp + MAX_STOP_ARRIVAL_AHEAD_SECONDS
+            ):
+                continue
             try:
-                est_dt = datetime.fromtimestamp(int(est_ts))
+                est_dt = datetime.fromtimestamp(int(est_ts), PARIS_TIMEZONE)
                 realtime_arrivals[stop_id].append({
                     'timestamp': int(est_ts),
                     'time': est_dt.strftime("%H:%M"),
@@ -713,15 +598,40 @@ def build_arrivals(trip_updates_feed):
     for arrivals in realtime_arrivals.values():
         arrivals.sort(key=lambda x: x['timestamp'])
 
+    for stop_id in set(static_arrivals) | set(realtime_arrivals):
+        arrivals = realtime_arrivals[stop_id]
+        realtime_trip_ids = {arrival['trip_id'] for arrival in arrivals}
+        arrivals.extend(
+            arrival
+            for arrival in static_arrivals.get(stop_id, [])
+            if arrival['trip_id'] not in realtime_trip_ids
+        )
+        arrivals.sort(key=lambda arrival: arrival['timestamp'])
+
     return static_arrivals, realtime_arrivals
 
 
-def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times, departure_delays, departure_schedules, departure_sources, static_arrivals, realtime_arrivals):
+def build_map(
+    siri_positions,
+    positions_feed,
+    static_arrivals,
+    realtime_arrivals,
+):
     m = folium.Map(
         location=[47.4784, -0.5632],
         zoom_start=12,
         tiles="OpenStreetMap",
     )
+    back_button_html = """
+    <a href="/" aria-label="Retour aux prochains passages"
+       style="position: fixed; top: 12px; left: 55px; z-index: 10000;
+              padding: 9px 14px; border: 1px solid #b8c2cc; border-radius: 8px;
+              background: white; color: #245a91; font: 600 14px sans-serif;
+              text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,.2);">
+      ← Retour aux prochains passages
+    </a>
+    """
+    m.get_root().html.add_child(folium.Element(back_button_html))
     print("📍 Affichage des trajets des lignes...")
     displayed_shapes = set()
     for trip_id, trip_info in trips_data.items():
@@ -754,33 +664,19 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
         if not coords:
             continue
         stop_name = stops_data.get(stop_id) or stop_id
-        stat = static_arrivals.get(stop_id, [])[:2]
-        real = realtime_arrivals.get(stop_id, [])[:2]
-        stat_html = ''
-        if stat:
-            for s in stat:
-                route = s.get('route_id') or ''
-                trip_id = s.get('trip_id')
-                dest = trips_data.get(trip_id, {}).get('headsign', '') if trip_id else ''
-                dest_display = f" → {dest}" if dest else ''
-                stat_html += f"{s.get('time')} (L{route}){dest_display}<br>"
-        else:
-            stat_html = 'Aucun passage prévu<br>'
-
-        real_html = ''
-        if real:
-            for r in real:
-                route = r.get('route_id') or ''
-                trip_id = r.get('trip_id')
-                dest = trips_data.get(trip_id, {}).get('headsign', '') if trip_id else ''
-                dest_display = f" → {dest}" if dest else ''
-                real_html += f"{r.get('time')} (L{route}){dest_display}<br>"
-        else:
-            real_html = 'Aucune estimation temps réel<br>'
-
+        arrivals = realtime_arrivals.get(stop_id, [])[:2]
+        arrivals_html = ''
+        for arrival in arrivals:
+            route = arrival.get('route_id') or ''
+            trip_id = arrival.get('trip_id')
+            dest = trips_data.get(trip_id, {}).get('headsign', '') if trip_id else ''
+            dest_display = f" → {dest}" if dest else ''
+            arrivals_html += f"{arrival['time']} (L{route}){dest_display}<br>"
+        if not arrivals_html:
+            arrivals_html = 'Aucun passage prochainement<br>'
         popup_html = (
             f"<b>Arrêt :</b> {stop_name}<br><hr><b>Prochains passages :</b><br>"
-            f"{real_html if real else stat_html}"
+            f"{arrivals_html}"
         )
         folium.CircleMarker(
             location=[coords[0], coords[1]],
@@ -797,14 +693,28 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
     count = 0
     displayed_vehicle_types = []
     realtime_count = 0
-    static_count = 0
     stale_position_count = 0
-    displayed_trip_ids = set()
 
-    def add_marker(lat, lon, route_id, route_name, trip_id, vehicle_id, dest, departure_time, departure_source, popup):
-        nonlocal count, realtime_count, static_count
+    def add_marker(
+        lat,
+        lon,
+        route_id,
+        route_name,
+        trip_id,
+        vehicle_id,
+        dest,
+        departure_source,
+        popup,
+    ):
+        nonlocal count, realtime_count
         style = get_route_style(routes_data.get(route_id, {}), route_id=route_id)
-        icon = create_custom_icon(route_name, vehicle_id, style, destination=dest, departure_time=departure_time, departure_source=departure_source)
+        icon = create_custom_icon(
+            route_name,
+            vehicle_id,
+            style,
+            destination=dest,
+            departure_source=departure_source,
+        )
         folium.Marker(
             location=[lat, lon],
             popup=folium.Popup(popup, max_width=300),
@@ -815,8 +725,6 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
         count += 1
         if departure_source.startswith('realtime'):
             realtime_count += 1
-        elif departure_source == 'static':
-            static_count += 1
 
     if positions_feed:
         positions_checked_at = time.time()
@@ -827,9 +735,11 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             if not is_fresh_vehicle_position(vehicle, positions_checked_at):
                 stale_position_count += 1
                 continue
+            vehicle_id = vehicle.vehicle.id.strip()
+            if not vehicle_id or vehicle_id.upper() == 'N/A':
+                continue
             lat = vehicle.position.latitude
             lon = vehicle.position.longitude
-            vehicle_id = vehicle.vehicle.id if vehicle.vehicle.id else 'N/A'
             trip_id = vehicle.trip.trip_id if vehicle.trip.trip_id else 'N/A'
             route_id = vehicle.trip.route_id if vehicle.trip.route_id else 'N/A'
             route_number = route_id_number(route_id)
@@ -847,26 +757,6 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             dest = trips_data.get(trip_id, {}).get('headsign', '') if trip_id else ''
             if not dest:
                 dest = getattr(vehicle.trip, 'trip_headsign', '') or ''
-            scheduled = get_next_scheduled_departure(trip_id)
-            scheduled_time = departure_schedules.get(trip_id) or (scheduled and scheduled.get('departure_time'))
-            next_stop_name = stops_data.get(scheduled.get('stop_id')) if scheduled else None
-            departure_time = departure_times.get(trip_id)
-            delay_seconds = departure_delays.get(trip_id)
-            delay_text = None
-            if delay_seconds is not None:
-                delay_minutes = round(delay_seconds / 60)
-                prefix = '+' if delay_minutes >= 0 else ''
-                delay_text = f"{prefix}{delay_minutes} min"
-            terminus_info = get_terminus_info(trip_id, delay_seconds=delay_seconds)
-            terminus_arrival_time = terminus_info.get('arrival_time') if terminus_info else None
-            terminus_stop_name = terminus_info.get('stop_name') if terminus_info else None
-            if terminus_arrival_time:
-                terminus_seconds = parse_gtfs_time(terminus_arrival_time)
-                if terminus_seconds is not None and terminus_seconds < get_current_seconds():
-                    continue
-            if departure_time is None and scheduled is not None:
-                departure_time = format_seconds_as_time(scheduled['departure_seconds'])
-            departure_source = departure_sources.get(trip_id) or ('static' if scheduled else 'N/A')
             position_age_seconds = max(
                 0,
                 int(positions_checked_at - vehicle.timestamp),
@@ -879,16 +769,18 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             <b>Trip :</b> {trip_id}<br>
             <b>Dernière position GPS :</b> il y a {position_age_seconds} s<br>
             <b>Destination :</b> {dest or 'N/A'}<br>
-            <b>Source horaire :</b> {departure_source}<br>
-            <b>Arrêt suivant :</b> {next_stop_name or 'N/A'}<br>
-            <b>Départ prévu :</b> {scheduled_time or 'N/A'}<br>
-            <b>Départ estimé :</b> {departure_time or 'N/A'}<br>
-            <b>Termin. :</b> {terminus_stop_name or 'N/A'}<br>
-            <b>Arrivée terminus :</b> {terminus_arrival_time or 'N/A'}<br>
-            <b>Écart :</b> {delay_text or 'N/A'}<br>
             """
-            add_marker(lat, lon, route_id, route_name, trip_id, vehicle_id, dest, departure_time, departure_source, popup)
-            displayed_trip_ids.add(trip_id)
+            add_marker(
+                lat,
+                lon,
+                route_id,
+                route_name,
+                trip_id,
+                vehicle_id,
+                dest,
+                'realtime',
+                popup,
+            )
 
     if stale_position_count:
         print(
@@ -900,6 +792,8 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
     if siri_positions:
         for vehicle in siri_positions:
             vehicle_id = vehicle.get('vehicle_id') or 'N/A'
+            if not str(vehicle_id).strip() or str(vehicle_id).strip().upper() == 'N/A':
+                continue
             lat = vehicle.get('latitude')
             lon = vehicle.get('longitude')
             if lat is None or lon is None:
@@ -911,12 +805,7 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             route_info = routes_data.get(route_id, {})
             route_name = route_info.get('name', route_id)
             dest = vehicle.get('dest') or ''
-            departure_time = vehicle.get('expected_time')
-            departure_source = 'realtime-siri'
             siri_trip_id = vehicle.get('trip_id')
-            terminus_info = get_terminus_info(siri_trip_id) if siri_trip_id else None
-            terminus_stop_name = terminus_info.get('stop_name') if terminus_info else None
-            terminus_arrival_time = terminus_info.get('arrival_time') if terminus_info else None
             style = get_route_style(route_info, route_id=route_id)
             popup = f"""
             <b>Ligne :</b> {route_name}<br>
@@ -924,65 +813,23 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             <b>Véhicule :</b> {vehicle_id}<br>
             <b>Trip :</b> {siri_trip_id or 'N/A'}<br>
             <b>Destination :</b> {dest or 'N/A'}<br>
-            <b>Terminus :</b> {terminus_stop_name or 'N/A'}<br>
-            <b>Arrivée terminus :</b> {terminus_arrival_time or 'N/A'}<br>
-            <b>Source horaire :</b> {departure_source}<br>
-            <b>Heure estimée :</b> {departure_time or 'N/A'}<br>
-            <b>Écart :</b> N/A<br>
             """
-            add_marker(lat, lon, route_id, route_name, siri_trip_id or vehicle_id, vehicle_id, dest, departure_time, departure_source, popup)
-
-    if trip_updates_feed:
-        for entity in trip_updates_feed.entity:
-            if not entity.HasField('trip_update'):
-                continue
-            trip_update = entity.trip_update
-            trip_id = trip_update.trip.trip_id if trip_update.trip.trip_id else None
-            route_id = trip_update.trip.route_id if trip_update.trip.route_id else None
-            if not trip_id or trip_id in displayed_trip_ids:
-                continue
-            if not route_id:
-                route_id = trips_data.get(trip_id, {}).get('route_id')
-            
-            # Vérifier si le service est actif aujourd'hui
-            trip_info = trips_data.get(trip_id, {})
-            service_id = trip_info.get('service_id', '')
-            if not is_service_active_today(service_id):
-                continue
-            
-            route_number = route_id_number(route_id)
-            if route_number is not None and route_number > 42:
-                continue
-
-            next_stop = get_next_trip_update_stop(trip_update, trip_id)
-            if not next_stop:
-                continue
-            coords = stops_coords.get(next_stop['stop_id'])
-            if not coords:
-                continue
-
-            route_info = routes_data.get(route_id, {})
-            style = get_route_style(route_info, route_id=route_id)
-            route_name = route_info.get('name', route_id or 'N/A')
-            dest = trips_data.get(trip_id, {}).get('headsign', '')
-            departure_time = departure_times.get(trip_id) or next_stop['time']
-            departure_source = departure_sources.get(trip_id, 'realtime-tripupdate')
-            popup = f"""
-            <b>Ligne :</b> {route_name}<br>
-            <b>Type :</b> {style['route_emoji']} {style['route_type_name']}<br>
-            <b>Trip :</b> {trip_id}<br>
-            <b>Destination :</b> {dest or 'N/A'}<br>
-            <b>Position :</b> estimation au prochain arrêt (pas GPS)<br>
-            <b>Arrêt estimé :</b> {stops_data.get(next_stop['stop_id'], next_stop['stop_id'])}<br>
-            <b>Heure estimée :</b> {next_stop['time']}<br>
-            <b>Source :</b> GTFS-RT<br>
-            """
-            add_marker(coords[0], coords[1], route_id, route_name, trip_id, f"{route_id}-{trip_id[-4:]}", dest, next_stop['time'], 'realtime-tripupdate', popup)
+            add_marker(
+                lat,
+                lon,
+                route_id,
+                route_name,
+                siri_trip_id or vehicle_id,
+                vehicle_id,
+                dest,
+                'realtime-siri',
+                popup,
+            )
 
     bus_count = displayed_vehicle_types.count('bus')
     tram_count = displayed_vehicle_types.count('tram')
     print(f"✅ {count} véhicules affichés ({bus_count} bus, {tram_count} trams)")
-    print(f"   ⏱️ Horaires temps réel : {realtime_count}, statiques : {static_count}")
+    print(f"   ⏱️ Véhicules avec position temps réel : {realtime_count}")
 
     legend_html = '''
     <div style="position: fixed; 
@@ -1149,17 +996,11 @@ def main():
         trip_updates_feed = fetch_gtfs_realtime_feed(session, GTFS_RT_URL_TRIP_UPDATES, "GTFS trip-updates")
         positions_feed = fetch_gtfs_realtime_feed(session, GTFS_RT_URL, "GTFS vehicle-positions", cache_file=CACHE_POSITIONS_FILE)
 
-        departure_times, departure_delays, departure_schedules, departure_sources = parse_trip_updates(trip_updates_feed)
         static_arrivals, realtime_arrivals = build_arrivals(trip_updates_feed)
 
         map_object = build_map(
             siri_positions,
-            trip_updates_feed,
             positions_feed,
-            departure_times,
-            departure_delays,
-            departure_schedules,
-            departure_sources,
             static_arrivals,
             realtime_arrivals,
         )

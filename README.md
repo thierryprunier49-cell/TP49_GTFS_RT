@@ -59,10 +59,12 @@ génère un `index.html` autonome à la racine, pour que le déploiement n'ait p
 besoin du dossier `frontend`. En production, le générateur de cartographie
 actualise aussi la carte toutes les 15 secondes ; elle est accessible à `/carte`.
 Les positions GTFS-RT sans horodatage ou âgées de plus d'une minute sont
-ignorées ; l'âge de la dernière position GPS est aussi affiché dans la fiche
-du véhicule. En l'absence de position GPS récente, une estimation depuis
-GTFS-RT n'est affichée que pour le prochain arrêt prévu dans les 15 minutes ;
-elle est signalée comme une estimation et non comme une position GPS.
+ignorées ; les véhicules sans numéro sont masqués et l'âge de la dernière
+position GPS est affiché dans leur fiche. Les marqueurs représentent uniquement
+des positions GPS réelles (GTFS-RT ou SIRI), sans heure de départ. Les fiches
+d'arrêt combinent les horaires statiques et temps réel futurs, triés en heure
+locale d'Angers ; les estimations passées ou situées à plus de trois heures sont
+écartées. Un bouton permet de revenir à la page des prochains passages.
 
 ### Déploiement sur Render
 
