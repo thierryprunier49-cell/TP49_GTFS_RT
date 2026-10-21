@@ -51,15 +51,35 @@ pas la mise à jour des données. Arrêtez le script avec `Ctrl+C`.
 L'application React est conçue pour être hébergée sur Render et accessible depuis
 un téléphone, y compris hors du réseau Wi-Fi local. Le serveur Python sert
 l'interface et fournit les données GTFS par une API, avec une actualisation
-automatique toutes les 10 secondes lorsque la page est ouverte.
+automatique toutes les 10 secondes lorsque la page est ouverte. La compilation
+génère un `index.html` autonome à la racine, pour que le déploiement n'ait pas
+besoin du dossier `frontend`.
 
 ### Déploiement sur Render
 
-1. Placez le projet dans un dépôt GitHub privé ou public et poussez les fichiers.
-   Render doit pouvoir lire le dépôt pour construire l'application.
-2. Dans Render, choisissez **New +** puis **Blueprint** et connectez le dépôt.
-3. Render détectera `render.yaml`, construira l'interface React et l'API, puis
-   fournira une URL HTTPS à ouvrir sur le téléphone.
+#### Depuis un dépôt GitHub (Blueprint)
+
+1. Compilez l'interface depuis le dossier du projet :
+
+```powershell
+cd frontend
+npm.cmd ci
+npm.cmd run build
+cd ..
+```
+
+La compilation crée `index.html` à la racine du projet. Envoyez sur GitHub les
+fichiers du projet, y compris `render.yaml`, puis choisissez **New +** →
+**Blueprint** dans Render et connectez le dépôt.
+
+#### Depuis un téléversement de fichiers sur Render
+
+1. Effectuez la compilation ci-dessus sur le PC.
+2. Dans le service Render, remplacez les fichiers téléversés par ces cinq
+   fichiers, tous à la racine : `Dockerfile`, `requirements.txt`,
+   `gtfs_rt_prouhon.py`, `web_app.py` et `index.html`.
+3. Relancez le déploiement. Aucun dossier `frontend` n'est nécessaire : le
+   fichier `index.html` généré contient déjà l'interface complète.
 
 Le plan gratuit peut mettre l'application en veille après une période sans visite ;
 le premier chargement qui suit peut prendre un peu plus de temps. Le PC personnel

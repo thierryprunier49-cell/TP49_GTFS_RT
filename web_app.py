@@ -11,7 +11,7 @@ import requests
 import gtfs_rt_prouhon as transit
 
 app = Flask(__name__)
-FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
+FRONTEND_DIST = Path(__file__).resolve().parent
 REFRESH_INTERVAL_SECONDS = 10
 PARIS_TIMEZONE = transit.LOCAL_TIMEZONE
 
