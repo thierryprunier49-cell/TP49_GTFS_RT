@@ -25,6 +25,9 @@ http://127.0.0.1:8000/irigo_map.html
 > Ouvrir `irigo_map.html` directement avec `file://` peut parfois provoquer un rendu blanc si les ressources externes ne sont pas chargées correctement.
 
 Le fond de la carte interactive utilise les tuiles OpenStreetMap, sans clé d'API.
+Dans la légende, « Car Suburbain » désigne les véhicules affectés aux lignes
+dont le numéro est supérieur à 20, à l'exception des trams A, B et C. Ils sont
+représentés par un losange et gardent la couleur GTFS de leur ligne.
 
 ## Remarque
 
@@ -57,7 +60,9 @@ besoin du dossier `frontend`. En production, le générateur de cartographie
 actualise aussi la carte toutes les 15 secondes ; elle est accessible à `/carte`.
 Les positions GTFS-RT sans horodatage ou âgées de plus d'une minute sont
 ignorées ; l'âge de la dernière position GPS est aussi affiché dans la fiche
-du véhicule.
+du véhicule. En l'absence de position GPS récente, une estimation depuis
+GTFS-RT n'est affichée que pour le prochain arrêt prévu dans les 15 minutes ;
+elle est signalée comme une estimation et non comme une position GPS.
 
 ### Déploiement sur Render
 

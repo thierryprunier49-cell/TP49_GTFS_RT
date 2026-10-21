@@ -36,6 +36,7 @@ SIRI_API_KEY_HEADER = os.environ.get("SIRI_API_KEY_HEADER", "X-API-Key")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 AUTO_REFRESH_SECONDS = 15
 MAX_VEHICLE_POSITION_AGE_SECONDS = 60
+MAX_TRIP_UPDATE_ESTIMATE_AHEAD_SECONDS = 15 * 60
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(DATA_DIR, "irigo_map.html")
 CACHE_POSITIONS_FILE = os.path.join(DATA_DIR, "positions.pb")
@@ -410,7 +411,9 @@ def get_route_style(route_info, route_id=None):
 
     type_style = ROUTE_TYPE_STYLES.get(route_type, {"name": "Autre", "emoji": "❓", "shape": "rounded"})
     route_number = route_id_number(route_id)
-    if route_number is not None and 30 <= route_number <= 42:
+    route_name = str(route_info.get('name', '')).strip().upper()
+    is_protected_tram = route_type in (0, 5) or route_name in {'A', 'B', 'C'}
+    if route_number is not None and route_number > 20 and not is_protected_tram:
         type_style = {**type_style, 'shape': 'diamond'}
 
     return {
@@ -477,6 +480,68 @@ def is_fresh_vehicle_position(vehicle, now=None):
     reference_time = time.time() if now is None else now
     age_seconds = reference_time - vehicle.timestamp
     return -30 <= age_seconds <= MAX_VEHICLE_POSITION_AGE_SECONDS
+
+
+def get_next_trip_update_stop(trip_update, trip_id, now=None):
+    now_timestamp = time.time() if now is None else now
+    today_midnight = datetime.fromtimestamp(now_timestamp).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    ).timestamp()
+    candidates = []
+
+    for stop_update in trip_update.stop_time_update:
+        stop_id = stop_update.stop_id or None
+        if not stop_id or stop_id not in stops_coords:
+            continue
+
+        estimated_timestamp = None
+        if stop_update.HasField('departure') and stop_update.departure.HasField('time'):
+            estimated_timestamp = stop_update.departure.time
+        elif stop_update.HasField('arrival') and stop_update.arrival.HasField('time'):
+            estimated_timestamp = stop_update.arrival.time
+        else:
+            delay = None
+            if stop_update.HasField('departure') and stop_update.departure.HasField('delay'):
+                delay = stop_update.departure.delay
+            elif stop_update.HasField('arrival') and stop_update.arrival.HasField('delay'):
+                delay = stop_update.arrival.delay
+            if delay is not None:
+                for scheduled_stop in scheduled_departures.get(trip_id, []):
+                    if (
+                        scheduled_stop.get('stop_id') == stop_id
+                        and scheduled_stop.get('departure_seconds') is not None
+                    ):
+                        estimated_timestamp = int(
+                            today_midnight
+                            + scheduled_stop['departure_seconds']
+                            + delay
+                        )
+                        break
+
+        if estimated_timestamp is None:
+            continue
+        seconds_ahead = estimated_timestamp - now_timestamp
+        if not 0 <= seconds_ahead <= MAX_TRIP_UPDATE_ESTIMATE_AHEAD_SECONDS:
+            continue
+        candidates.append(
+            (
+                estimated_timestamp,
+                stop_update.stop_sequence,
+                stop_id,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    estimated_timestamp, _, stop_id = min(candidates)
+    return {
+        'stop_id': stop_id,
+        'time': datetime.fromtimestamp(estimated_timestamp).strftime('%H:%M'),
+    }
 
 
 def fetch_gtfs_realtime_feed(session, url, label, cache_file=None):
@@ -889,35 +954,7 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             if route_number is not None and route_number > 42:
                 continue
 
-            today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-            next_stop = None
-            next_ts = None
-            for stu in trip_update.stop_time_update:
-                stop_id = stu.stop_id if stu.stop_id else None
-                if not stop_id or stop_id not in stops_coords:
-                    continue
-                est_ts = None
-                if stu.HasField('departure') and stu.departure.HasField('time'):
-                    est_ts = stu.departure.time
-                elif stu.HasField('arrival') and stu.arrival.HasField('time'):
-                    est_ts = stu.arrival.time
-                else:
-                    delay = None
-                    if stu.HasField('departure') and stu.departure.HasField('delay'):
-                        delay = stu.departure.delay
-                    elif stu.HasField('arrival') and stu.arrival.HasField('delay'):
-                        delay = stu.arrival.delay
-                    if delay is not None and trip_id in scheduled_departures:
-                        for s in scheduled_departures[trip_id]:
-                            if s.get('stop_id') == stop_id and s.get('departure_seconds') is not None:
-                                est_ts = int(today_midnight + s['departure_seconds'] + delay)
-                                break
-                if est_ts is None:
-                    continue
-                if next_ts is None or est_ts < next_ts:
-                    next_ts = est_ts
-                    next_stop = {'stop_id': stop_id, 'time': datetime.fromtimestamp(int(est_ts)).strftime('%H:%M')}
-
+            next_stop = get_next_trip_update_stop(trip_update, trip_id)
             if not next_stop:
                 continue
             coords = stops_coords.get(next_stop['stop_id'])
@@ -935,11 +972,12 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
             <b>Type :</b> {style['route_emoji']} {style['route_type_name']}<br>
             <b>Trip :</b> {trip_id}<br>
             <b>Destination :</b> {dest or 'N/A'}<br>
+            <b>Position :</b> estimation au prochain arrêt (pas GPS)<br>
             <b>Arrêt estimé :</b> {stops_data.get(next_stop['stop_id'], next_stop['stop_id'])}<br>
-            <b>Heure estimée :</b> {departure_time or 'N/A'}<br>
-            <b>Source :</b> {departure_source}<br>
+            <b>Heure estimée :</b> {next_stop['time']}<br>
+            <b>Source :</b> GTFS-RT<br>
             """
-            add_marker(coords[0], coords[1], route_id, route_name, trip_id, f"{route_id}-{trip_id[-4:]}", dest, departure_time, departure_source, popup)
+            add_marker(coords[0], coords[1], route_id, route_name, trip_id, f"{route_id}-{trip_id[-4:]}", dest, next_stop['time'], 'realtime-tripupdate', popup)
 
     bus_count = displayed_vehicle_types.count('bus')
     tram_count = displayed_vehicle_types.count('tram')
@@ -961,8 +999,8 @@ def build_map(siri_positions, trip_updates_feed, positions_feed, departure_times
              Tram
          </div>
          <div style="margin: 6px 0; display: flex; align-items: center; gap: 8px;">
-             <span style="display: inline-block; width: 16px; height: 16px; background: #2E8B57; border-radius: 14px;"></span>
-             Métro / Autre
+             <span style="display: inline-block; width: 12px; height: 12px; margin: 2px; background: #2E8B57; transform: rotate(45deg);"></span>
+             Car Suburbain
          </div>
          <p style="margin: 8px 0 0 0; font-size: 12px; color: gray;">Couleurs selon la ligne GTFS</p>
     </div>

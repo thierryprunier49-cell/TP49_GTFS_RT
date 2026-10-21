@@ -309,7 +309,9 @@ def get_route_style(route_info, route_id=None):
 
     type_style = ROUTE_TYPE_STYLES.get(route_type, {"name": "Autre", "emoji": "❓", "shape": "rounded"})
     route_number = route_id_number(route_id)
-    if route_number is not None and 30 <= route_number <= 42:
+    route_name = str(route_info.get('name', '')).strip().upper()
+    is_protected_tram = route_type in (0, 5) or route_name in {'A', 'B', 'C'}
+    if route_number is not None and route_number > 20 and not is_protected_tram:
         type_style = {**type_style, 'shape': 'diamond'}
 
     return {
@@ -774,8 +776,8 @@ while True:
              Tram
          </div>
          <div style="margin: 6px 0; display: flex; align-items: center; gap: 8px;">
-             <span style="display: inline-block; width: 16px; height: 16px; background: #2E8B57; border-radius: 14px;"></span>
-             Métro / Autre
+             <span style="display: inline-block; width: 12px; height: 12px; margin: 2px; background: #2E8B57; transform: rotate(45deg);"></span>
+             Car Suburbain
          </div>
          <p style="margin: 8px 0 0 0; font-size: 12px; color: gray;">Couleurs selon la ligne GTFS</p>
     </div>
