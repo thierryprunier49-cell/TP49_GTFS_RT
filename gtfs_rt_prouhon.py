@@ -443,9 +443,9 @@ def build_html_report(reports, stops, served_stops_by_route):
 
     route_names = sorted(
         {
-            str(item.get("route_short_name", ""))
-            for report in reports
-            for item in report.get("results") or []
+            route_name
+            for stop_data in served_stops_by_route.values()
+            for route_name in stop_data["route_names"]
         },
         key=lambda route_name: (normalize_text(route_name), route_name),
     )
@@ -703,13 +703,6 @@ def main():
         scheduled_departures,
         trips,
     )
-    origin_ids = sorted(
-        {
-            entry["stop_id"]
-            for stops_list in scheduled_departures.values()
-            for entry in stops_list
-        }
-    )
     browser_opened = False
     
     # Boucle de rafraîchissement toutes les 10 secondes
@@ -724,23 +717,45 @@ def main():
             print(f"Services actifs aujourd'hui : {len(active_service_ids)}")
 
             reports = []
-            for title, origin_patterns in SEARCH_PAIRS:
-                preferred_origin_ids = find_stop_ids(stops, origin_patterns)
+            preferred_origin_ids = sorted(
+                {
+                    stop_id
+                    for _, origin_patterns in SEARCH_PAIRS
+                    for stop_id in find_stop_ids(stops, origin_patterns)
+                }
+            )
+            origin_ids = sorted(
+                {
+                    entry["stop_id"]
+                    for stop_entries in scheduled_departures.values()
+                    for entry in stop_entries
+                }
+            )
+            print(f"\nArrêts desservis : {len(served_stops_by_route)}")
+            print_candidates("arrêts préférés", stops, preferred_origin_ids)
 
-                print(f"\nRequête : {title}")
-                print_candidates("origines", stops, origin_ids)
+            results = select_trips(
+                stops,
+                scheduled_departures,
+                realtime_index,
+                origin_ids,
+                active_service_ids,
+                trips,
+                max_results=12,
+            )
+            print(
+                f"{len(results)} prochains passages calculés "
+                f"sur {len(origin_ids)} arrêts desservis."
+            )
 
-                results = select_trips(stops, scheduled_departures, realtime_index, origin_ids, active_service_ids, trips, max_results=12)
-                print_trip_results(title, results)
-
-                reports.append(
-                    {
-                        "title": title,
-                        "origin_ids": origin_ids,
-                        "preferred_origin_ids": preferred_origin_ids,
-                        "results": results,
-                    }
-                )
+            reports.append(
+                {
+                    "title": "Tous les arrêts desservis",
+                    "origin_ids": origin_ids,
+                    "preferred_origin_ids": preferred_origin_ids,
+                    "results": results,
+                }
+            )
 
             save_html_report(reports, stops, served_stops_by_route, OUTPUT_HTML)
             if not browser_opened:

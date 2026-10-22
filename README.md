@@ -33,11 +33,12 @@ représentés par un losange et gardent la couleur GTFS de leur ligne.
 
 Une correction JS a été appliquée dans `irigo_map.html` pour supprimer une faute de frappe (`frefre`) dans le script de gestion d'état du zoom/centre.
 
-## Prochains passages depuis Proudhon
+## Prochains passages par arrêt
 
-Le script `gtfs_rt_prouhon.py` affiche les prochains bus depuis l'arrêt Proudhon
-en direction du centre-ville (arrêt Foch-Maison Bleue). Pour que les données
-soient actualisées, il faut laisser ce script tourner : il récupère les horaires,
+Le script `gtfs_rt_prouhon.py` affiche les prochains passages pour tous les
+arrêts desservis par le réseau. Proudhon est sélectionné par défaut ; utilisez
+le sélecteur d'arrêt pour consulter les passages des autres arrêts. Pour que les
+données soient actualisées, laissez le script tourner : il récupère les horaires,
 met à jour le rapport toutes les 10 secondes et ouvre la page dans le navigateur
 au premier rafraîchissement.
 
