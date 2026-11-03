@@ -36,6 +36,7 @@ SIRI_API_KEY_HEADER = os.environ.get("SIRI_API_KEY_HEADER", "X-API-Key")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 AUTO_REFRESH_SECONDS = 15
+DUPLICATE_ARRIVAL_WINDOW_SECONDS = 60
 MAX_VEHICLE_POSITION_AGE_SECONDS = 60
 MAX_STOP_ARRIVAL_AHEAD_SECONDS = 3 * 60 * 60
 PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
@@ -509,6 +510,30 @@ def fetch_gtfs_realtime_feed(session, url, label, cache_file=None):
         return None
 
 
+def deduplicate_arrivals(arrivals):
+    """Keep the earliest arrival when the same line and destination are reported together."""
+    filtered = []
+    latest_by_service = {}
+    for arrival in sorted(arrivals, key=lambda item: item['timestamp']):
+        trip_info = trips_data.get(arrival.get('trip_id'), {})
+        route_id = arrival.get('route_id') or trip_info.get('route_id')
+        headsign = trip_info.get('headsign', '').strip().casefold()
+        service_key = (
+            route_id,
+            headsign or arrival.get('trip_id'),
+        )
+        previous = latest_by_service.get(service_key)
+        if (
+            previous is not None
+            and arrival['timestamp'] - previous['timestamp']
+            <= DUPLICATE_ARRIVAL_WINDOW_SECONDS
+        ):
+            continue
+        filtered.append(arrival)
+        latest_by_service[service_key] = arrival
+    return filtered
+
+
 def build_arrivals(trip_updates_feed):
     static_arrivals = defaultdict(list)
     realtime_arrivals = defaultdict(list)
@@ -606,7 +631,7 @@ def build_arrivals(trip_updates_feed):
             for arrival in static_arrivals.get(stop_id, [])
             if arrival['trip_id'] not in realtime_trip_ids
         )
-        arrivals.sort(key=lambda arrival: arrival['timestamp'])
+        realtime_arrivals[stop_id] = deduplicate_arrivals(arrivals)
 
     return static_arrivals, realtime_arrivals
 
@@ -620,8 +645,15 @@ def build_map(
     m = folium.Map(
         location=[47.4784, -0.5632],
         zoom_start=12,
-        tiles="OpenStreetMap",
+        tiles=None,
     )
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles © Esri — Source: Esri, HERE, Garmin, OpenStreetMap contributors, and the GIS User Community",
+        name="Esri World Street Map",
+        overlay=False,
+        control=True,
+    ).add_to(m)
     back_button_html = """
     <a href="/" target="_top" aria-label="Retour aux prochains passages"
        style="position: fixed; top: 12px; left: 55px; z-index: 10000;
@@ -858,6 +890,10 @@ def build_map(
     <script>
       (function() {{
         var storageKey = 'irigo_map_state';
+
+        window.setTimeout(function() {{
+          window.location.reload();
+        }}, {AUTO_REFRESH_SECONDS * 1000});
 
         function getMapInstance() {{
           if (window.L && window.L.Map) {{
