@@ -3,10 +3,12 @@
 
 import csv
 import io
+import json
 import os
 import sys
 import tempfile
 import time
+import unicodedata
 import zipfile
 from collections import defaultdict
 from datetime import datetime
@@ -35,7 +37,7 @@ SIRI_API_KEY = os.environ.get("SIRI_API_KEY")
 SIRI_API_KEY_HEADER = os.environ.get("SIRI_API_KEY_HEADER", "X-API-Key")
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-AUTO_REFRESH_SECONDS = 15
+AUTO_REFRESH_SECONDS = 30
 DUPLICATE_ARRIVAL_WINDOW_SECONDS = 60
 MAX_VEHICLE_POSITION_AGE_SECONDS = 60
 MAX_STOP_ARRIVAL_AHEAD_SECONDS = 3 * 60 * 60
@@ -160,6 +162,15 @@ def parse_gtfs_time(time_str):
         return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
     except Exception:
         return None
+
+
+def normalize_stop_name(value):
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    ).lower().strip()
 
 
 def is_service_active_today(service_id):
@@ -886,10 +897,32 @@ def build_map(
     '''
     m.get_root().html.add_child(folium.Element(legend_html))
 
+    stop_coordinates = defaultdict(list)
+    for stop_id, coords in stops_coords.items():
+        if coords:
+            stop_name = stops_data.get(stop_id) or stop_id
+            stop_group = normalize_stop_name(stop_name) or stop_id
+            stop_coordinates[stop_group].append(coords)
+    stop_centers = {
+        stop_group: [
+            sum(coords[0] for coords in locations) / len(locations),
+            sum(coords[1] for coords in locations) / len(locations),
+        ]
+        for stop_group, locations in stop_coordinates.items()
+    }
+    stop_centers_json = json.dumps(stop_centers, ensure_ascii=False).replace(
+        "<",
+        "\\u003c",
+    )
+
     refresh_html = f'''
     <script>
       (function() {{
         var storageKey = 'irigo_map_state';
+        var stopCenters = {stop_centers_json};
+        var mapQuery = new URLSearchParams(window.location.search);
+        var requestedStop = mapQuery.get('stop');
+        var centerOnRequestedStop = mapQuery.get('center') === '1';
 
         window.setTimeout(function() {{
           window.location.reload();
@@ -922,6 +955,21 @@ def build_map(
           }} catch (e) {{}}
         }}
 
+        function centerOnSelectedStop(map) {{
+          var stopCenter = requestedStop && stopCenters[requestedStop];
+          if (!centerOnRequestedStop || !stopCenter) {{
+            return false;
+          }}
+          map.setView(stopCenter, 16);
+          mapQuery.set('center', '0');
+          window.history.replaceState(
+            null,
+            '',
+            window.location.pathname + '?' + mapQuery.toString() + window.location.hash
+          );
+          return true;
+        }}
+
         function saveState(map) {{
           try {{
             var center = map.getCenter();
@@ -940,7 +988,9 @@ def build_map(
           if (!map) {{
             return;
           }}
-          restoreState(map);
+          if (!centerOnSelectedStop(map)) {{
+            restoreState(map);
+          }}
           map.on('moveend zoomend', function() {{
             saveState(map);
           }});

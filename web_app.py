@@ -131,14 +131,24 @@ def map_page():
     </style>
   </head>
   <body>
-    <iframe id="map-a" title="Cartographie Irigo" src="/carte/map"></iframe>
+    <iframe id="map-a" title="Cartographie Irigo"></iframe>
     <iframe id="map-b" title="Actualisation de la cartographie" class="map-hidden"></iframe>
     <script>
       (function() {
-        const refreshInterval = 15000;
+        const refreshInterval = 30000;
         let activeMap = document.getElementById("map-a");
         let loadingMap = document.getElementById("map-b");
         let refreshPending = false;
+        const selectedStop = new URLSearchParams(window.location.search).get("stop");
+
+        function mapUrl(refresh, center) {
+          const params = new URLSearchParams();
+          if (selectedStop) params.set("stop", selectedStop);
+          if (center) params.set("center", "1");
+          if (refresh) params.set("refresh", Date.now());
+          const query = params.toString();
+          return "/carte/map" + (query ? "?" + query : "");
+        }
 
         function refreshMap() {
           if (refreshPending) return;
@@ -151,9 +161,10 @@ def map_page():
             loadingMap = previousMap;
             refreshPending = false;
           };
-          loadingMap.src = "/carte/map?refresh=" + Date.now();
+          loadingMap.src = mapUrl(true, false);
         }
 
+        activeMap.src = mapUrl(false, true);
         window.setInterval(refreshMap, refreshInterval);
       })();
     </script>
